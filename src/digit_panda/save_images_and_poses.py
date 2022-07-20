@@ -75,7 +75,8 @@ class SaveImagesAndPosesReal():
         while not rospy.is_shutdown():
 
             frame = self.digit.get_frame()
-            frame_viz = cv2.resize(frame, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
+            frame_viz = copy.deepcopy(frame)
+            frame_viz = cv2.resize(frame_viz, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
             cv2.imshow('image', frame_viz)
 
             with self.mutex:
