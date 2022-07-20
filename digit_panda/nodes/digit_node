@@ -1,0 +1,7 @@
+
+#!/usr/bin/env python
+
+from digit_panda.save_images_and_poses import main
+
+if __name__ == "__main__":
+   main()
