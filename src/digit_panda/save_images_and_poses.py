@@ -1,35 +1,20 @@
 import cv2
-from digit_interface.digit import Digit
-from enum import Enum, auto
-import math
-import numpy as np
+import copy
+import numpy
 import os
 import sys
-from threading import Lock
-import time
-import xml.etree.ElementTree as et
-import yarp
 import rospy
+from datetime import datetime
+from digit_interface.digit import Digit
+from digit_panda.srv import Command, CommandResponse
+from enum import Enum, auto
 from franka_msgs.msg import FrankaState
-
-# Not useful
-from digit_panda.srv import Command
-
-
-dirname = os.path.abspath(os.path.dirname(__file__))
-
-if (os.path.isdir(dirname + "/images")):
-    images_directory = (dirname + "/images")
-
-else:
-    print("Creating directory..")
-    os.mkdir(dirname + "/images")
-    images_directory = (dirname + "/images")
+from threading import Lock
 
 
 class State(Enum):
 
-    SaveImage = auto()
+    SaveData = auto()
     Idle = auto()
 
 
@@ -54,23 +39,33 @@ class SaveImagesAndPosesReal():
         """
         Constructor.
         """
+
         rospy.init_node('digit_node')
 
+        # Create folder for data output
+        self.output_path = '/home/panda-admin/Documents/gcaddeo/' + datetime.now().strftime('%d_%m_%Y_%H_%M_%S') + '/'
+        self.output_path_images = self.output_path + '/images'
+        os.makedirs(self.output_path_images, exist_ok = True)
+        rospy.loginfo('Saving data in ' + self.output_path)
+
         # Connect the DIGIT.
-        self.digit = Digit("D20066")
+        self.digit = Digit('D20066')
         self.digit.connect()
+
+        # State machine
         self.counter = 0
         self.state = StateMachine()
-        self.label = 0
+
+        self.franka_state = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.callback_pose)
+        self.command_service = rospy.Service('~command', Command, self.callback_service)
+
+        # Mutex
         self.mutex = Lock()
-        rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.callback_pose)
-        rospy.Subscriber('/save_pose_image', String, self.callback_save)
-        print("Deleting label and poses file")
-        f = open(dirname + "/labels.csv", "w")
-        f.close()
-        f = open(dirname + "/poses.txt", "w")
-        f.close()
-        self.pose = 0
+
+        # End effector poses
+        self.pose = None
+        self.poses = []
+
 
     def loop(self):
 
@@ -79,44 +74,51 @@ class SaveImagesAndPosesReal():
         """
         while not rospy.is_shutdown():
 
+            frame = self.digit.get_frame()
+            frame_viz = cv2.resize(frame, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
+            cv2.imshow('image', frame_viz)
+
             with self.mutex:
-                frame = self.digit.get_frame()
+
                 actual_state = self.state.get_state()
-                
-                
+
                 if actual_state == State.Idle:
                     pass
 
-                elif actual_state == State.SaveImage:
+                elif actual_state == State.SaveData:
 
-                    print("SaveImage state")
+                    rospy.loginfo('Saving item no. ' + str(self.counter))
 
-                    f = open(dirname + "/labels.csv", "a")
-                    f.write("Image" + str(self.counter) + ".png" + ", " + str(self.label) + "\n")
-                    f.close()
-                    print("Saving number " + str(self.counter))
-                    cv2.imwrite(images_directory + "/Image" + str(self.counter) + ".png", frame)
-                    print(self.pose)
+                    if self.pose is not None:
+                        rospy.loginfo(self.pose)
+                        self.poses.append(numpy.array((self.pose)))
+                        cv2.imwrite(self.output_path_images + '/' + str(self.counter) + '.png', frame)
+
                     self.counter += 1
                     self.state.set_state(State.Idle)
 
-                cv2.imshow("image", frame)
-                cv2.waitKey(3)
+            cv2.waitKey(33)
 
 
-    def callback_save(self, req):
+    def callback_service(self, req):
+
         command = req.command
+
         with self.mutex:
-            if command == 'save':
-                self.state.set_state(State.SaveImage)
+            if command == 'collect':
+                self.state.set_state(State.SaveData)
+            elif command == 'save':
+                numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
 
 
-    def callback_pose(self, req):
-        command = req.O_T_EE
+    def callback_pose(self, data):
+
         with self.mutex:
-            self.pose = command
+            self.pose = data.O_T_EE
 
-if __name__ == '__main__':
+
+def main():
 
     module = SaveImagesAndPosesReal()
+
     module.loop()
