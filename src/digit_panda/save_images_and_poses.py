@@ -88,11 +88,16 @@ class SaveImagesAndPosesReal():
                 elif actual_state == State.Collect:
 
                     if self.pose is not None:
+
+                        rospy.loginfo('Saving item no. ' + str(self.counter))
+
                         rospy.loginfo(self.pose)
                         self.poses.append(numpy.array((self.pose)))
                         cv2.imwrite(self.output_path_images + '/' + str(self.counter) + '.png', frame)
 
-                    self.counter += 1
+                        self.counter += 1
+                    else:
+                        rospy.loginfo('Error: Cannot read end effector pose')
                     self.state.set_state(State.Idle)
 
             cv2.waitKey(33)
