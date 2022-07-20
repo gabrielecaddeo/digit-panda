@@ -14,7 +14,7 @@ from threading import Lock
 
 class State(Enum):
 
-    SaveData = auto()
+    Collect = auto()
     Idle = auto()
 
 
@@ -85,9 +85,7 @@ class SaveImagesAndPosesReal():
                 if actual_state == State.Idle:
                     pass
 
-                elif actual_state == State.SaveData:
-
-                    rospy.loginfo('Saving item no. ' + str(self.counter))
+                elif actual_state == State.Collect:
 
                     if self.pose is not None:
                         rospy.loginfo(self.pose)
@@ -106,7 +104,7 @@ class SaveImagesAndPosesReal():
 
         with self.mutex:
             if command == 'collect':
-                self.state.set_state(State.SaveData)
+                self.state.set_state(State.Collect)
             elif command == 'save':
                 numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
 
