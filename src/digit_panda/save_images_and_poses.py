@@ -9,7 +9,7 @@ from digit_interface.digit import Digit
 from digit_panda.srv import Command, CommandResponse
 from enum import Enum, auto
 from franka_msgs.msg import FrankaState
-from geometry_msg.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped
 import configparser
 from threading import Lock
 import json
@@ -17,15 +17,16 @@ import pyquaternion as pyq
 
 class State(Enum):
 
-    Collect = auto()
+    CollectDigitPose = auto()
+    CollectObjectPose = auto()
     Idle = auto()
-    SaveAruco = auto()
+    Save = auto()
 
 
 class StateMachine:
 
     def __init__(self):
-        self.state = State.SaveAruco
+        self.state = State.CollectObjectPose
 
 
     def set_state(self, state):
@@ -43,17 +44,17 @@ class SaveImagesAndPosesReal():
         """
         Constructor.
         """
-, 
+
         config = configparser.ConfigParser()
         config.read(config_file_path)
-        
+
         self.digit_transform = config.get('Transformations', 'digit_transform')
         self.digit_transform = json.loads(self.digit_transform)
-        self.digit_transform = np.array(self.digit_transform)
+        self.digit_transform = numpy.array(self.digit_transform)
 
         self.camera_transform = config.get('Transformations', 'digit_transform')
-        self.camera_transform = json.loadsself.camera_transform()
-        self.camera_transform = np.array(self.camera_transform)
+        self.camera_transform = json.loads(self.camera_transform)
+        self.camera_transform = numpy.array(self.camera_transform)
 
         rospy.init_node('digit_node')
 
@@ -64,7 +65,7 @@ class SaveImagesAndPosesReal():
         rospy.loginfo('Saving data in ' + self.output_path)
 
         # Connect the DIGIT.
-        self.digit = Digit('D20066')
+        self.digit = Digit('D20016')
         self.digit.connect()
 
         # State machine
@@ -88,9 +89,11 @@ class SaveImagesAndPosesReal():
         self.poses = []
 
         # Aruco poses
-        # End effector poses
         self.pose_aruco = None
         self.poses_aruco = []
+
+        # Object pose
+        self.object_pose = None
 
 
     def loop(self):
@@ -98,7 +101,7 @@ class SaveImagesAndPosesReal():
         """
         Update the module by calling this function every getPeriod().
         """
-        
+
         while not rospy.is_shutdown():
 
             frame = self.digit.get_frame()
@@ -110,49 +113,45 @@ class SaveImagesAndPosesReal():
 
                 actual_state = self.state.get_state()
 
-                
+                # If we know where the object is, stream the pose
+                if self.object_pose is not None:
+                    self.pub_object_pose.publish(self.object_pose)
+
+                if self.pose is not None:
+
+                    ## Create a matrix
+                    pose_digit = numpy.zeros((4,4))
+                    pose_digit[:, 0] = self.pose[:4]
+                    pose_digit[:, 1] = self.pose[4:8]
+                    pose_digit[:, 2] = self.pose[8:12]
+                    pose_digit[:, 3] = self.pose[12:]
+
+                    pose_digit_final = pose_digit @ self.digit_transform
+                    final_quat = pyq.Quaternion(matrix=pose_digit_final[:3, :3])
+                    pose_digit_pub = PoseStamped()
+                    pose_digit_pub.pose.orientation.w = final_quat.w
+                    pose_digit_pub.pose.orientation.x = final_quat.x
+                    pose_digit_pub.pose.orientation.y = final_quat.y
+                    pose_digit_pub.pose.orientation.z = final_quat.z
+                    pose_digit_pub.pose.position.x = pose_digit_final[0,3]
+                    pose_digit_pub.pose.position.y = pose_digit_final[1,3]
+                    pose_digit_pub.pose.position.z = pose_digit_final[2,3]
+
+                    self.pub_digit_pose.publish(pose_digit_pub)
+
                 if actual_state == State.Idle:
+
                     pass
 
-                elif actual_state == State.Collect:
+                elif actual_state == State.CollectDigitPose:
 
-                    if self.pose is not None:
+                    pass
 
-                        rospy.loginfo('Saving item no. ' + str(self.counter))
+                elif actual_state == State.Save:
 
-                        rospy.loginfo(self.pose)
+                    pass
 
-                        ## Create a matrix
-
-                        pose_digit = np.zeros((4,4))
-                        pose_digit[:, 0] = self.pose[:4]
-                        pose_digit[:, 1] = self.pose[4:8]
-                        pose_digit[:, 2] = self.pose[8:12]
-                        pose_digit[:, 3] = self.pose[12:]
-
-                        pose_digit_final = pose_digit @ self.digit_transform
-                        final_quat = pyq.Quaternion(matrix=pose_digit_final[:3, :3])
-                        pose_digit_pub = PoseStamped()
-                        pose_digit_pub.orientation.w = final_quat.w
-                        pose_digit_pub.orientation.x = final_quat.x
-                        pose_digit_pub.orientation.y = final_quat.y
-                        pose_digit_pub.orientation.z = final_quat.z
-                        pose_digit_pub.position.x = pose_digit_final[0,3]
-                        pose_digit_pub.position.y = pose_digit_final[1,3]
-                        popose_digit_pubse.position.z = pose_digit_final[2,3]
-
-                        self.pub_digit_pose.pub(pose_digit_pub)
-
-                        self.poses.append(numpy.array((self.pose)))
-                        self.poses_aruco.append(numpy.array((self.pose)))
-                        cv2.imwrite(self.output_path_images + '/' + str(self.counter) + '.png', frame)
-
-                        self.counter += 1
-                    else:
-                        rospy.loginfo('Error: Cannot read end effector pose')
-                    self.state.set_state(State.Idle)
-                
-                elif actual_state == State.SaveAruco:
+                elif actual_state == State.CollectObjectPose:
                     rospy.loginfo('Saving Object pose')
 
                     transform_matrix = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
@@ -162,17 +161,16 @@ class SaveImagesAndPosesReal():
 
                     final_transform = self.camera_transform @ transform_matrix
                     final_quat = pyq.Quaternion(matrix=final_transform[:3, :3])
-                    pose = PoseStamped()
-                    pose.orientation.w = final_quat.w
-                    pose.orientation.x = final_quat.x
-                    pose.orientation.y = final_quat.y
-                    pose.orientation.z = final_quat.z
-                    pose.position.x = final_transform[0,3]
-                    pose.position.y = final_transform[1,3]
-                    pose.position.z = final_transform[2,3]
+                    self.object_pose = PoseStamped()
+                    self.object_pose.pose.orientation.w = final_quat.w
+                    self.object_pose.pose.orientation.x = final_quat.x
+                    self.object_pose.pose.orientation.y = final_quat.y
+                    self.object_pose.pose.orientation.z = final_quat.z
+                    self.object_pose.pose.position.x = final_transform[0,3]
+                    self.object_pose.pose.position.y = final_transform[1,3]
+                    self.object_pose.pose.position.z = final_transform[2,3]
 
-                    self.pub_object_pose.publish(pose)
-                
+                    self.state.set_state(State.Idle)
 
             cv2.waitKey(33)
 
@@ -185,8 +183,9 @@ class SaveImagesAndPosesReal():
             if command == 'collect':
                 self.state.set_state(State.Collect)
             elif command == 'save':
-                numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
-                numpy.savetxt(self.output_path + '/poses_aruco.txt', numpy.array(self.poses))
+                self.state.set_state(State.Save)
+                # numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
+                # numpy.savetxt(self.output_path + '/poses_aruco.txt', numpy.array(self.poses))
 
 
     def callback_pose(self, data):
@@ -203,7 +202,7 @@ class SaveImagesAndPosesReal():
 def main():
     fn = sys.argv[1]
     if os.path.exists(fn):
-        print(os.path.basename(fn)
+        print(os.path.basename(fn))
     else:
         print('pass a valid file')
         exit(1)

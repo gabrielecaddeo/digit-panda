@@ -1,22 +1,23 @@
-# 
+#
 #  Copyright (C) 2023 Istituto Italiano di Tecnologia (IIT)
-#  
+#
 #  This software may be modified and distributed under the terms of the
 #  GPL-2+ license. See the accompanying LICENSE file for details.
-#  
+#
 import numpy as np
 import time
 import threading
 import vtk
 import vtk.util.numpy_support as vtk_np
 import argparse
-
-# import rospy
+import rospy
+from geometry_msgs.msg import PoseStamped
+from threading import Lock
 
 class VTKPointCloudOnMesh():
     """
     A class to represent a dynamic point cloud on a mesh.
-    
+
     '''
 
     Attributes
@@ -77,10 +78,10 @@ class VTKPointCloudOnMesh():
         self.actor_mesh_digit.SetMapper(mapper_mesh)
 
         ## ROS
-        rospy.init_node('digit_node')
+        rospy.init_node('visualizer')
 
-        self.digit_state = rospy.Subscriber('/franka_state_controller/franka_states', PoseStamped, self.callback_pose_digit)
-        self.object_state = rospy.Subscriber('/aruco_board_detector/board_pose', PoseStamped, self.callback_pose_aruco)
+        self.digit_state = rospy.Subscriber('/digit_node/digit_pose', PoseStamped, self.callback_pose_digit)
+        self.object_state = rospy.Subscriber('/digit_node/object_pose', PoseStamped, self.callback_pose_aruco)
         self.bool_digit = False
         self.bool_object = False
 
@@ -110,7 +111,7 @@ class VTKPointCloudOnMesh():
         -------
         None
         """
-        
+
         thread = threading.Thread(target=self.update_actor, args=(thread_lock, update_on, function, args))
         thread.start()
 
@@ -138,25 +139,17 @@ class VTKPointCloudOnMesh():
         while (update_on.is_set()) and self.mutex and self.mutex2:
             time.sleep(0.01)
             thread_lock.acquire()
-            
-            # # Update the 
-            # nparray = function(*args)
-
-            # Update the vtk class of the point cloud
 
             ### Modify trial
-            if self.bool_digit:
+            # if self.bool_digit:
 
-                self.actor_mesh_digit.RotateWXYZ(self.pose_digit.orientation.w, self.pose_digit.orientation.x, self.pose_digit.orientation.y, self.pose_digit.orientation.z)
-                self.actor_mesh_digit.SetPosition(self.pose_digit.position.x, self.pose_digit.position.y, self.pose_digit.position.z)
+            #     self.actor_mesh_digit.RotateWXYZ(self.pose_digit.orientation.w, self.pose_digit.orientation.x, self.pose_digit.orientation.y, self.pose_digit.orientation.z)
+            #     self.actor_mesh_digit.SetPosition(self.pose_digit.position.x, self.pose_digit.position.y, self.pose_digit.position.z)
 
             if self.bool_object:
 
                 self.actor_mesh_object.RotateWXYZ(self.pose_aruco.orientation.w, self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z)
                 self.actor_mesh_object.SetPosition(self.pose_aruco.position.x, self.pose_aruco.position.y, self.pose_aruco.position.z)
-
-            # pos1 = self.actor_mesh_digit.GetPosition()
-            # self.actor_mesh_digit.SetPosition(pos1[0] - 0.001, pos1[1], pos1[2])
 
             thread_lock.release()
 
@@ -176,7 +169,7 @@ class VTKPointCloudOnMesh():
 class VTKVisualisation():
     """
     A class to start a vtk visualizer
-    
+
     '''
 
     Attributes
@@ -216,7 +209,7 @@ class VTKVisualisation():
         axis : bool
             boolean to decide wheater render the axis in the origin or not
         """
-         
+
         # Assign the semaphore
         self.thread_lock = thread_lock
 
@@ -226,7 +219,7 @@ class VTKVisualisation():
 
         # Add the point cloud
         self.ren.AddActor(actor_wrapper.actor_mesh_object)
-        
+
         # Add the mesh
         self.ren.AddActor(actor_wrapper.actor_mesh_digit)
 
@@ -286,7 +279,7 @@ def function_loop(prune_object):
     digit_object : Digit
         wrapper for the Digit sensor
     """
-    
+
     print('ciao')
     return prune_object
 
@@ -300,7 +293,7 @@ def main():
     parser.add_argument('--object', dest='mesh', help='object to import the mesh of', type=str, required=True)
     parser.add_argument('--point_cloud', dest='point_cloud', help='point cloud of the object under test', type=str, required=True)
     args = parser.parse_args()
-    
+
     # Initialize the threading event and the semaphore
     update_on = threading.Event()
     update_on.set()
@@ -308,7 +301,7 @@ def main():
 
     # Set the visualizer
     actorWrapper = VTKPointCloudOnMesh(args.mesh, args.point_cloud)
-    actorWrapper.update(thread_lock, update_on, function_loop, ('ciao'))  
+    actorWrapper.update(thread_lock, update_on, function_loop, ('ciao'))
     viz = VTKVisualisation(thread_lock, actorWrapper)
     viz.int_ren.Start()
 
