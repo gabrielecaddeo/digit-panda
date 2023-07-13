@@ -21,5 +21,6 @@ catkin_package(CATKIN_DEPENDS rospy)
 
 install(PROGRAMS
      nodes/digit_node
+     nodes/visualizer_node
      DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

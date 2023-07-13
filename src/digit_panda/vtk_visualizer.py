@@ -4,15 +4,17 @@
 #  This software may be modified and distributed under the terms of the
 #  GPL-2+ license. See the accompanying LICENSE file for details.
 #
+import argparse
+from geometry_msgs.msg import PoseStamped
 import numpy as np
-import time
+import pyquaternion
+import rospy
 import threading
+from threading import Lock
+import time
 import vtk
 import vtk.util.numpy_support as vtk_np
-import argparse
-import rospy
-from geometry_msgs.msg import PoseStamped
-from threading import Lock
+
 
 class VTKPointCloudOnMesh():
     """
@@ -86,11 +88,10 @@ class VTKPointCloudOnMesh():
         self.bool_object = False
 
         # Mutex
-        self.mutex = Lock()
-        self.mutex2 = Lock()
+        self.mutex_object = Lock()
+        self.mutex_digit = Lock()
 
         self.pose_digit = self.pose_aruco = None
-
 
     def update(self, thread_lock, update_on, function, args):
         """
@@ -115,7 +116,6 @@ class VTKPointCloudOnMesh():
         thread = threading.Thread(target=self.update_actor, args=(thread_lock, update_on, function, args))
         thread.start()
 
-
     def update_actor(self, thread_lock, update_on, function, args):
         """
         Function to update the point cloud
@@ -136,35 +136,46 @@ class VTKPointCloudOnMesh():
         None
         """
 
-        while (update_on.is_set()) and self.mutex and self.mutex2:
+        while (update_on.is_set()) and self.mutex_object and self.mutex_digit:
             time.sleep(0.01)
             thread_lock.acquire()
 
             ### Modify trial
-            # if self.bool_digit:
-
-            #     self.actor_mesh_digit.RotateWXYZ(self.pose_digit.orientation.w, self.pose_digit.orientation.x, self.pose_digit.orientation.y, self.pose_digit.orientation.z)
-            #     self.actor_mesh_digit.SetPosition(self.pose_digit.position.x, self.pose_digit.position.y, self.pose_digit.position.z)
-
             if self.bool_object:
 
-                self.actor_mesh_object.RotateWXYZ(self.pose_aruco.orientation.w, self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z)
-                self.actor_mesh_object.SetPosition(self.pose_aruco.position.x, self.pose_aruco.position.y, self.pose_aruco.position.z)
+                self.actor_mesh_digit.SetMatrix(matriset_matrix(self.pose_digit))
+
+            if self.bool_object:   
+
+                self.actor_mesh_object.SetMatrix(set_matrix(self.pose_aruco))
 
             thread_lock.release()
+    
+    def set_matrix(self, pose):
+
+        transform_matrix = pyq.Quaternion(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z).transformation_matrix
+        transform_matrix[0,3] = pose.position.x
+        transform_matrix[1,3] = pose.position.y
+        transform_matrix[2,3] = pose.position.z
+        matrix4x4 = vtkMatrix4x4()
+        [matrix4x4.setElement(x, y, transformation_matrix[x,y]) for x in range(4) for y in range(4)]
+        
+        return matrix4x4
+
 
 
     def callback_pose_digit(self, data):
 
-        with self.mutex:
+        with self.mutex_digit:
             self.bool_digit = True
             self.pose_digit = data.pose
 
     def callback_pose_aruco(self, data):
 
-        with self.mutex2:
+        with self.mutex_object:
             self.bool_object = True
             self.pose_aruco = data.pose
+
 
 class VTKVisualisation():
     """
@@ -291,7 +302,7 @@ def main():
     # Initialize the parser and parse the inputs
     parser = argparse.ArgumentParser(description= '')
     parser.add_argument('--object', dest='mesh', help='object to import the mesh of', type=str, required=True)
-    parser.add_argument('--point_cloud', dest='point_cloud', help='point cloud of the object under test', type=str, required=True)
+    parser.add_argument('--sensor', dest='sensor', help='sensor to import the mesh of', type=str, required=True)
     args = parser.parse_args()
 
     # Initialize the threading event and the semaphore
