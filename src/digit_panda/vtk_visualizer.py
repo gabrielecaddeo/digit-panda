@@ -80,7 +80,7 @@ class VTKPointCloudOnMesh():
         self.actor_mesh_digit.SetMapper(mapper_mesh)
 
         ## ROS
-        rospy.init_node('visualizer')
+        rospy.init_node('visualizer_node')
 
         self.digit_state = rospy.Subscriber('/digit_node/digit_pose', PoseStamped, self.callback_pose_digit)
         self.object_state = rospy.Subscriber('/digit_node/object_pose', PoseStamped, self.callback_pose_aruco)
@@ -93,7 +93,7 @@ class VTKPointCloudOnMesh():
 
         self.pose_digit = self.pose_aruco = None
 
-    def update(self, thread_lock, update_on, function, args):
+    def update(self, thread_lock, update_on):
         """
         Start a new thread to continuously update the point cloud with a function.
 
@@ -113,10 +113,10 @@ class VTKPointCloudOnMesh():
         None
         """
 
-        thread = threading.Thread(target=self.update_actor, args=(thread_lock, update_on, function, args))
+        thread = threading.Thread(target=self.update_actor, args=(thread_lock, update_on))
         thread.start()
 
-    def update_actor(self, thread_lock, update_on, function, args):
+    def update_actor(self, thread_lock, update_on):
         """
         Function to update the point cloud
 
@@ -143,11 +143,11 @@ class VTKPointCloudOnMesh():
             ### Modify trial
             if self.bool_object:
 
-                self.actor_mesh_digit.SetMatrix(matriset_matrix(self.pose_digit))
+                self.actor_mesh_digit.SetUserMatrix(self.set_matrix(self.pose_digit))
 
             if self.bool_object:   
 
-                self.actor_mesh_object.SetMatrix(set_matrix(self.pose_aruco))
+                self.actor_mesh_object.SetUserMatrix(self.set_matrix(self.pose_aruco))
 
             thread_lock.release()
     
@@ -157,8 +157,8 @@ class VTKPointCloudOnMesh():
         transform_matrix[0,3] = pose.position.x
         transform_matrix[1,3] = pose.position.y
         transform_matrix[2,3] = pose.position.z
-        matrix4x4 = vtkMatrix4x4()
-        [matrix4x4.setElement(x, y, transformation_matrix[x,y]) for x in range(4) for y in range(4)]
+        matrix4x4 = vtk.vtkMatrix4x4()
+        [matrix4x4.SetElement(x, y, transform_matrix[x,y]) for x in range(4) for y in range(4)]
         
         return matrix4x4
 
@@ -278,22 +278,6 @@ class VTKVisualisation():
         self.thread_lock.release()
 
 
-
-def function_loop(prune_object):
-    """
-    Function to be passed in the loop to update the point cloud dependending on the image coming from the DIGIT sensor.
-
-    Parameters
-    ----------
-    prune_object : PrunePointCloud
-        wrapper for the point cloud pruner
-    digit_object : Digit
-        wrapper for the Digit sensor
-    """
-
-    print('ciao')
-    return prune_object
-
 def main():
     """
     Main function of the script.
@@ -311,8 +295,8 @@ def main():
     thread_lock = threading.Lock()
 
     # Set the visualizer
-    actorWrapper = VTKPointCloudOnMesh(args.mesh, args.point_cloud)
-    actorWrapper.update(thread_lock, update_on, function_loop, ('ciao'))
+    actorWrapper = VTKPointCloudOnMesh(args.mesh, args.sensor)
+    actorWrapper.update(thread_lock, update_on)
     viz = VTKVisualisation(thread_lock, actorWrapper)
     viz.int_ren.Start()
 

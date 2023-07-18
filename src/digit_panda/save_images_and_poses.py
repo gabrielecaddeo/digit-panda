@@ -116,6 +116,15 @@ class SaveImagesAndPosesReal():
                 # If we know where the object is, stream the pose
                 if self.object_pose is not None:
                     self.pub_object_pose.publish(self.object_pose)
+                else:
+                    transform_matrix = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
+                    transform_matrix[0,3] = self.pose_aruco.position.x
+                    transform_matrix[1,3] = self.pose_aruco.position.y
+                    transform_matrix[2,3] = self.pose_aruco.position.z
+
+                    final_transform = self.camera_transform @ transform_matrix
+                    self.pub_object_pose.publish(self.set_pose(final_transform))
+
 
                 if self.pose is not None:
 
@@ -127,17 +136,8 @@ class SaveImagesAndPosesReal():
                     pose_digit[:, 3] = self.pose[12:]
 
                     pose_digit_final = pose_digit @ self.digit_transform
-                    final_quat = pyq.Quaternion(matrix=pose_digit_final[:3, :3])
-                    pose_digit_pub = PoseStamped()
-                    pose_digit_pub.pose.orientation.w = final_quat.w
-                    pose_digit_pub.pose.orientation.x = final_quat.x
-                    pose_digit_pub.pose.orientation.y = final_quat.y
-                    pose_digit_pub.pose.orientation.z = final_quat.z
-                    pose_digit_pub.pose.position.x = pose_digit_final[0,3]
-                    pose_digit_pub.pose.position.y = pose_digit_final[1,3]
-                    pose_digit_pub.pose.position.z = pose_digit_final[2,3]
 
-                    self.pub_digit_pose.publish(pose_digit_pub)
+                    self.pub_digit_pose.publish(self.set_pose(pose_digit_final))
 
                 if actual_state == State.Idle:
 
@@ -160,20 +160,26 @@ class SaveImagesAndPosesReal():
                     transform_matrix[2,3] = self.pose_aruco.position.z
 
                     final_transform = self.camera_transform @ transform_matrix
-                    final_quat = pyq.Quaternion(matrix=final_transform[:3, :3])
-                    self.object_pose = PoseStamped()
-                    self.object_pose.pose.orientation.w = final_quat.w
-                    self.object_pose.pose.orientation.x = final_quat.x
-                    self.object_pose.pose.orientation.y = final_quat.y
-                    self.object_pose.pose.orientation.z = final_quat.z
-                    self.object_pose.pose.position.x = final_transform[0,3]
-                    self.object_pose.pose.position.y = final_transform[1,3]
-                    self.object_pose.pose.position.z = final_transform[2,3]
+                    self.object_pose = self.set_pose(final_transform)
 
                     self.state.set_state(State.Idle)
 
             cv2.waitKey(33)
 
+    def set_pose(self, matrix_pose):
+
+        pose_stamped = PoseStamped()
+        pose_quat = pyq.Quaternion(matrix=matrix_pose[:3, :3])
+
+        pose_stamped.pose.orientation.w = pose_quat.w
+        pose_stamped.pose.orientation.x = pose_quat.x
+        pose_stamped.pose.orientation.y = pose_quat.y
+        pose_stamped.pose.orientation.z = pose_quat.z
+        pose_stamped.pose.position.x = matrix_pose[0,3]
+        pose_stamped.pose.position.y = matrix_pose[1,3]
+        pose_stamped.pose.position.z = matrix_pose[2,3]
+
+        return pose_stamped
 
     def callback_service(self, req):
 
