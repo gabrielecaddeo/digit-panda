@@ -26,7 +26,7 @@ class State(Enum):
 class StateMachine:
 
     def __init__(self):
-        self.state = State.CollectObjectPose
+        self.state = State.Idle
 
 
     def set_state(self, state):
@@ -85,7 +85,7 @@ class SaveImagesAndPosesReal():
         self.mutex2 = Lock()
 
         # End effector poses
-        self.pose = None
+        self.pose_franka_ee = None
         self.poses = []
 
         # Aruco poses
@@ -93,7 +93,7 @@ class SaveImagesAndPosesReal():
         self.poses_aruco = []
 
         # Object pose
-        self.object_pose = None
+        self.root_to_object_static = None
 
 
     def loop(self):
@@ -113,37 +113,40 @@ class SaveImagesAndPosesReal():
 
                 actual_state = self.state.get_state()
 
-                # If we know where the object is, stream the pose
-                if self.object_pose is not None:
-                    self.pub_object_pose.publish(self.object_pose)
+                # If we fixed the object pose, stream that instead of the current object pose
+                root_to_object = None
+                root_to_object_published = None
+                if self.root_to_object_static is not None:
+                    root_to_object_published = self.root_to_object_static
                 else:
-                    transform_matrix = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
-                    transform_matrix[0,3] = self.pose_aruco.position.x
-                    transform_matrix[1,3] = self.pose_aruco.position.y
-                    transform_matrix[2,3] = self.pose_aruco.position.z
+                    board_transform = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
+                    board_transform[0,3] = self.pose_aruco.position.x
+                    board_transform[1,3] = self.pose_aruco.position.y
+                    board_transform[2,3] = self.pose_aruco.position.z
 
-                    final_transform = self.camera_transform @ transform_matrix
-                    self.pub_object_pose.publish(self.set_pose(final_transform))
+                    # test
+                    object_transform = numpy.eye(4)
+                    object_transform[0,3] = 0.075
+                    object_transform[1,3] = 0.2
+                    object_transform[2,3] = 0.09237
+
+                    root_to_object = self.pose_franka_ee @ self.camera_transform @ board_transform @ object_transform
+                    root_to_object_published = root_to_object
+
+                self.pub_object_pose.publish(self.set_pose(root_to_object_published))
 
 
-                if self.pose is not None:
+                if self.pose_franka_ee is not None:
 
                     ## Create a matrix
-                    pose_digit = numpy.zeros((4,4))
-                    pose_digit[:, 0] = self.pose[:4]
-                    pose_digit[:, 1] = self.pose[4:8]
-                    pose_digit[:, 2] = self.pose[8:12]
-                    pose_digit[:, 3] = self.pose[12:]
-
-                    pose_digit_final = pose_digit @ self.digit_transform
-
-                    self.pub_digit_pose.publish(self.set_pose(pose_digit_final))
+                    pose_digit = self.pose_franka_ee @ self.digit_transform
+                    self.pub_digit_pose.publish(self.set_pose(pose_digit))
 
                 if actual_state == State.Idle:
 
                     pass
 
-                elif actual_state == State.CollectDigitPose:
+                elif actual_state == State.Collect:
 
                     pass
 
@@ -151,20 +154,15 @@ class SaveImagesAndPosesReal():
 
                     pass
 
-                elif actual_state == State.CollectObjectPose:
-                    rospy.loginfo('Saving Object pose')
+                elif actual_state == State.FreezeObjectPose:
+                    rospy.loginfo('Freezing the objecr pose.')
 
-                    transform_matrix = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
-                    transform_matrix[0,3] = self.pose_aruco.position.x
-                    transform_matrix[1,3] = self.pose_aruco.position.y
-                    transform_matrix[2,3] = self.pose_aruco.position.z
-
-                    final_transform = self.camera_transform @ transform_matrix
-                    self.object_pose = self.set_pose(final_transform)
+                    self.root_to_object_static = root_to_object
 
                     self.state.set_state(State.Idle)
 
             cv2.waitKey(33)
+
 
     def set_pose(self, matrix_pose):
 
@@ -181,13 +179,14 @@ class SaveImagesAndPosesReal():
 
         return pose_stamped
 
+
     def callback_service(self, req):
 
         command = req.command
 
         with self.mutex:
-            if command == 'collect':
-                self.state.set_state(State.Collect)
+            if command == 'freeze_object_pose':
+                self.state.set_state(State.FreezeObjectPose)
             elif command == 'save':
                 self.state.set_state(State.Save)
                 # numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
@@ -197,7 +196,12 @@ class SaveImagesAndPosesReal():
     def callback_pose(self, data):
 
         with self.mutex:
-            self.pose = data.O_T_EE
+            self.pose_franka_ee = numpy.zeros((4,4))
+            self.pose_franka_ee[:, 0] = data.O_T_EE[:4]
+            self.pose_franka_ee[:, 1] = data.O_T_EE[4:8]
+            self.pose_franka_ee[:, 2] = data.O_T_EE[8:12]
+            self.pose_franka_ee[:, 3] = data.O_T_EE[12:]
+
 
     def callback_pose_aruco(self, data):
 
