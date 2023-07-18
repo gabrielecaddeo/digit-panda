@@ -7,7 +7,7 @@
 import argparse
 from geometry_msgs.msg import PoseStamped
 import numpy as np
-import pyquaternion
+import pyquaternion as pyq
 import rospy
 import threading
 from threading import Lock
@@ -70,7 +70,7 @@ class VTKPointCloudOnMesh():
         self.actor_mesh_object = vtk.vtkActor()
         self.actor_mesh_object.SetMapper(mapper_mesh)
 
-        reader = vtk.vtkOBJReader()
+        reader = vtk.vtkSTLReader()
         reader.SetFileName(mesh_path_digit)
         mapper_mesh = vtk.vtkPolyDataMapper()
         output_port = reader.GetOutputPort()
@@ -141,16 +141,16 @@ class VTKPointCloudOnMesh():
             thread_lock.acquire()
 
             ### Modify trial
-            if self.bool_object:
+            if self.bool_digit:
 
                 self.actor_mesh_digit.SetUserMatrix(self.set_matrix(self.pose_digit))
 
-            if self.bool_object:   
+            if self.bool_object:
 
                 self.actor_mesh_object.SetUserMatrix(self.set_matrix(self.pose_aruco))
 
             thread_lock.release()
-    
+
     def set_matrix(self, pose):
 
         transform_matrix = pyq.Quaternion(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z).transformation_matrix
@@ -159,7 +159,7 @@ class VTKPointCloudOnMesh():
         transform_matrix[2,3] = pose.position.z
         matrix4x4 = vtk.vtkMatrix4x4()
         [matrix4x4.SetElement(x, y, transform_matrix[x,y]) for x in range(4) for y in range(4)]
-        
+
         return matrix4x4
 
 
