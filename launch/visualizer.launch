@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<launch>
+
+	<rosparam command="load" file="$(find digit_panda)/config/fc_config.yaml" ns="digit_panda" />
+
+	<node name="digit_save_images_and_poses" pkg="digit_panda" type="save_images_and_poses" output="screen"/>
+
+	<node name="digit_vtk_visualizer" pkg="digit_panda" type="vtk_visualizer" output="screen"/>
+    
+
+</launch>
