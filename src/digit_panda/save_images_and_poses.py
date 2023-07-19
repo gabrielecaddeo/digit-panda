@@ -17,8 +17,8 @@ import pyquaternion as pyq
 
 class State(Enum):
 
-    CollectDigitPose = auto()
-    CollectObjectPose = auto()
+    CollectDigitData = auto()
+    FreezeObjectPose = auto()
     Idle = auto()
     Save = auto()
 
@@ -52,7 +52,7 @@ class SaveImagesAndPosesReal():
         self.digit_transform = json.loads(self.digit_transform)
         self.digit_transform = numpy.array(self.digit_transform)
 
-        self.camera_transform = config.get('Transformations', 'digit_transform')
+        self.camera_transform = config.get('Transformations', 'camera_transform')
         self.camera_transform = json.loads(self.camera_transform)
         self.camera_transform = numpy.array(self.camera_transform)
 
@@ -65,14 +65,15 @@ class SaveImagesAndPosesReal():
         rospy.loginfo('Saving data in ' + self.output_path)
 
         # Connect the DIGIT.
-        self.digit = Digit('D20016')
-        self.digit.connect()
+        self.digit = None
+        # self.digit = Digit('D20016')
+        # self.digit.connect()
 
         # State machine
         self.counter = 0
         self.state = StateMachine()
 
-        self.franka_state = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.callback_pose)
+        self.franka_state = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.callback_pose_ee)
         self.object_state = rospy.Subscriber('/aruco_board_detector/board_pose', PoseStamped, self.callback_pose_aruco)
         self.command_service = rospy.Service('~command', Command, self.callback_service)
 
@@ -82,18 +83,19 @@ class SaveImagesAndPosesReal():
 
         # Mutex
         self.mutex = Lock()
-        self.mutex2 = Lock()
 
-        # End effector poses
+        # End effector pose
         self.pose_franka_ee = None
-        self.poses = []
 
-        # Aruco poses
+        # Aruco pose
         self.pose_aruco = None
-        self.poses_aruco = []
 
-        # Object pose
+        # Static object pose
         self.root_to_object_static = None
+
+        # Storage
+        self.poses_digit = []
+        self.poses_object = []
 
 
     def loop(self):
@@ -104,22 +106,31 @@ class SaveImagesAndPosesReal():
 
         while not rospy.is_shutdown():
 
-            frame = self.digit.get_frame()
-            frame_viz = copy.deepcopy(frame)
-            frame_viz = cv2.resize(frame_viz, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
-            cv2.imshow('image', frame_viz)
+            if self.digit is not None:
+                frame = self.digit.get_frame()
+                frame_viz = copy.deepcopy(frame)
+                frame_viz = cv2.resize(frame_viz, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
+                cv2.imshow('image', frame_viz)
 
-            with self.mutex and self.mutex2:
+            with self.mutex:
 
                 actual_state = self.state.get_state()
 
-                # If we fixed the object pose, stream that instead of the current object pose
                 root_to_object = None
                 root_to_object_published = None
+
                 if self.root_to_object_static is not None:
+                    # If we fixed the object pose, stream that instead of the current object pose
                     root_to_object_published = self.root_to_object_static
-                else:
-                    board_transform = pyq.Quaternion(self.pose_aruco.orientation.w,self.pose_aruco.orientation.x, self.pose_aruco.orientation.y, self.pose_aruco.orientation.z).transformation_matrix
+
+                elif (self.pose_aruco is not None) and (self.pose_franka_ee is not None):
+                    board_transform = pyq.Quaternion\
+                                      (
+                                          w = self.pose_aruco.orientation.w,
+                                          x = self.pose_aruco.orientation.x,
+                                          y = self.pose_aruco.orientation.y,
+                                          z = self.pose_aruco.orientation.z
+                                      ).transformation_matrix
                     board_transform[0,3] = self.pose_aruco.position.x
                     board_transform[1,3] = self.pose_aruco.position.y
                     board_transform[2,3] = self.pose_aruco.position.z
@@ -133,7 +144,8 @@ class SaveImagesAndPosesReal():
                     root_to_object = self.pose_franka_ee @ self.camera_transform @ board_transform @ object_transform
                     root_to_object_published = root_to_object
 
-                self.pub_object_pose.publish(self.set_pose(root_to_object_published))
+                if root_to_object_published is not None:
+                    self.pub_object_pose.publish(self.set_pose(root_to_object_published))
 
 
                 if self.pose_franka_ee is not None:
@@ -146,7 +158,7 @@ class SaveImagesAndPosesReal():
 
                     pass
 
-                elif actual_state == State.Collect:
+                elif actual_state == State.CollectDigitData:
 
                     pass
 
@@ -155,7 +167,7 @@ class SaveImagesAndPosesReal():
                     pass
 
                 elif actual_state == State.FreezeObjectPose:
-                    rospy.loginfo('Freezing the objecr pose.')
+                    rospy.loginfo('Freezing the object pose.')
 
                     self.root_to_object_static = root_to_object
 
@@ -189,11 +201,13 @@ class SaveImagesAndPosesReal():
                 self.state.set_state(State.FreezeObjectPose)
             elif command == 'save':
                 self.state.set_state(State.Save)
-                # numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
-                # numpy.savetxt(self.output_path + '/poses_aruco.txt', numpy.array(self.poses))
+        #         # numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
+        #         # numpy.savetxt(self.output_path + '/poses_aruco.txt', numpy.array(self.poses))
+
+        return CommandResponse()
 
 
-    def callback_pose(self, data):
+    def callback_pose_ee(self, data):
 
         with self.mutex:
             self.pose_franka_ee = numpy.zeros((4,4))
@@ -205,7 +219,7 @@ class SaveImagesAndPosesReal():
 
     def callback_pose_aruco(self, data):
 
-        with self.mutex2:
+        with self.mutex:
             self.pose_aruco = data.pose
 
 
