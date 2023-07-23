@@ -43,7 +43,7 @@ class VTKPointCloudOnMesh():
         Update the point cloud depending on the function passed.
     """
 
-    def __init__(self, mesh_path_object, mesh_path_digit):
+    def __init__(self, mesh_path_object, mesh_path_digit, point_cloud_path, rgb_color=(1, 0, 0), points_size=3):
         """
         Constructor.
 
@@ -59,6 +59,31 @@ class VTKPointCloudOnMesh():
             size of the points
         """
 
+        # Initialize the point cloud with a 3D point in the origin as default
+        self.point_cloud_array = np.loadtxt(point_cloud_path)[:, :3] 
+        self.n_elements = self.point_cloud_array.shape[0]
+
+        self.labels = np.loadtxt(point_cloud_path)[:, 6] 
+        # Create the vtk class for the point cloud
+        self.vtk_points = vtk.vtkPoints()
+        self.vtk_cells = vtk.vtkCellArray()
+        self.poly_data = vtk.vtkPolyData()
+        self.vtk_points.SetData(vtk_np.numpy_to_vtk(self.point_cloud_array))
+        cells_npy = np.vstack([np.ones(self.n_elements,dtype=np.int64),
+                               np.arange(self.n_elements,dtype=np.int64)]).T.flatten()
+        self.vtk_cells.SetCells(self.n_elements,vtk_np.numpy_to_vtkIdTypeArray(cells_npy))
+        self.poly_data.SetPoints(self.vtk_points)
+        self.poly_data.SetVerts(self.vtk_cells)
+
+        # Assing the point cloud to the actor through a mapper
+        mapper_point_cloud = vtk.vtkPolyDataMapper()
+        mapper_point_cloud.SetInputDataObject(self.poly_data)
+
+        self.actor_point_cloud = vtk.vtkActor()
+        self.actor_point_cloud.SetMapper(mapper_point_cloud)
+        self.actor_point_cloud.GetProperty().SetRepresentationToPoints()
+        self.actor_point_cloud.GetProperty().SetColor(*rgb_color)
+        self.actor_point_cloud.GetProperty().SetPointSize(points_size)
 
         # Initialize the mesh
         reader = vtk.vtkOBJReader()
@@ -142,12 +167,48 @@ class VTKPointCloudOnMesh():
 
             ### Modify trial
             if self.bool_digit:
-
-                self.actor_mesh_digit.SetUserMatrix(self.set_matrix(self.pose_digit))
+                
+                vtk_matrix_digit, numpy_matrix_digit = self.set_matrix(self.pose_digit)
+                self.actor_mesh_digit.SetUserMatrix(vtk_matrix_digit)
 
             if self.bool_object:
+                
+                vtk_matrix_object, numpy_matrix_object = self.set_matrix(self.pose_aruco)
+                self.actor_mesh_object.SetUserMatrix(vtk_matrix_object)
+                
+                if self.bool_digit:
+                    
+                    # Change Refernce Frame for the point_cloud
+                    points_robot_frame = numpy_matrix_object @ np.concatenate([self.point_cloud_array.T, np.ones((1,self.n_elements))], axis=0)
 
-                self.actor_mesh_object.SetUserMatrix(self.set_matrix(self.pose_aruco))
+                    # Intialize transformation to the surface of the gel
+                    transform_gel_digit = np.eye(4)
+                    transform_gel_digit[:, 3] = np.array([0.02, 0, 0.015])
+
+                    # Transform the pose of the digit
+                    matrix_surface_gel = numpy_matrix_digit @ transform_gel_digit
+
+                    # Compute the distance between the points in the robot reference frame and the DIGIT gel surface
+                    distances = np.linalg.norm(points_robot_frame - matrix_surface_gel[:,3].T, axis=0)
+
+                    # Find the min value
+                    min_index = np.argmin(distances)
+                    min_label = self.labels[min_index]
+
+                    indexes = np.array(self.labels==min_label)
+                    new_points = self.point_cloud_array[indexes]
+
+                    # Update the vtk class of the point cloud
+                    n_elements = new_points.shape[0]
+                    self.vtk_points.SetData(vtk_np.numpy_to_vtk(new_points))
+                    cells_npy = np.vstack([np.ones(n_elements,dtype=np.int64),
+                                        np.arange(n_elements,dtype=np.int64)]).T.flatten()
+                    self.vtk_cells.SetCells(n_elements,vtk_np.numpy_to_vtkIdTypeArray(cells_npy))
+                    self.poly_data.SetPoints(self.vtk_points)
+                    self.poly_data.SetVerts(self.vtk_cells)
+
+                    self.poly_data.Modified()
+
 
             thread_lock.release()
 
@@ -160,7 +221,7 @@ class VTKPointCloudOnMesh():
         matrix4x4 = vtk.vtkMatrix4x4()
         [matrix4x4.SetElement(x, y, transform_matrix[x,y]) for x in range(4) for y in range(4)]
 
-        return matrix4x4
+        return matrix4x4, transform_matrix
 
 
 
