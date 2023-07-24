@@ -43,7 +43,7 @@ class VTKPointCloudOnMesh():
         Update the point cloud depending on the function passed.
     """
 
-    def __init__(self, mesh_path_object, mesh_path_digit, point_cloud_path, rgb_color=(1, 0, 0), points_size=3):
+    def __init__(self, mesh_path_object, mesh_path_digit, point_cloud_path, labels, rgb_color=(1, 0, 0), points_size=3):
         """
         Constructor.
 
@@ -63,7 +63,14 @@ class VTKPointCloudOnMesh():
         self.point_cloud_array = np.loadtxt(point_cloud_path)[:, :3] 
         self.n_elements = self.point_cloud_array.shape[0]
 
-        self.labels = np.loadtxt(point_cloud_path)[:, 6] 
+
+        self.labels = np.zeros((0,1))
+        #self.labels = np.loadtxt(point_cloud_path)[:, 6] 
+        with open(labels) as labels_file:
+            lines = labels_file.readlines()
+            for line in lines:
+                np.append(self.labels, np.array([[line.rsplit(' ')[-1]]])
+                          
         # Create the vtk class for the point cloud
         self.vtk_points = vtk.vtkPoints()
         self.vtk_cells = vtk.vtkCellArray()
@@ -348,6 +355,9 @@ def main():
     parser = argparse.ArgumentParser(description= '')
     parser.add_argument('--object', dest='mesh', help='object to import the mesh of', type=str, required=True)
     parser.add_argument('--sensor', dest='sensor', help='sensor to import the mesh of', type=str, required=True)
+    parser.add_argument('--pc', dest='pc', help='path to the point cloud', type=str, required=True)
+    parser.add_argument('--labels', dest='labels', help='path to the labels', type=str, required=True)
+
     args = parser.parse_args()
 
     # Initialize the threading event and the semaphore
@@ -356,7 +366,7 @@ def main():
     thread_lock = threading.Lock()
 
     # Set the visualizer
-    actorWrapper = VTKPointCloudOnMesh(args.mesh, args.sensor)
+    actorWrapper = VTKPointCloudOnMesh(args.mesh, args.sensor, args.pc, args.labels)
     actorWrapper.update(thread_lock, update_on)
     viz = VTKVisualisation(thread_lock, actorWrapper)
     viz.int_ren.Start()
