@@ -15,13 +15,16 @@ from threading import Lock
 import json
 import pyquaternion as pyq
 
+import time
+
 class State(Enum):
 
     CollectDigitData = auto()
     FreezeObjectPose = auto()
     Idle = auto()
     Save = auto()
-
+    SaveVideo = auto()
+    SaveImage = auto()
 
 class StateMachine:
 
@@ -65,9 +68,9 @@ class SaveImagesAndPosesReal():
         rospy.loginfo('Saving data in ' + self.output_path)
 
         # Connect the DIGIT.
-        self.digit = None
-        # self.digit = Digit('D20016')
-        # self.digit.connect()
+        #self.digit = None
+        self.digit = Digit('D20052')
+        self.digit.connect()
 
         # State machine
         self.counter = 0
@@ -96,6 +99,17 @@ class SaveImagesAndPosesReal():
         # Storage
         self.poses_digit = []
         self.poses_object = []
+        # self.object_transform = numpy.zeros((4,4))
+        # self.object_transform[0,3] = 0.072129
+        # self.object_transform[1,3] = 0.2
+        # self.object_transform[2,3] = 0.021
+
+        self.object_transform = numpy.array([[1.0, 0.0, 0.0, 0.12],
+                                             [0.0, 1.0, 0.0, 0.2],
+                                             [0.0, 0.0, 1.0, 0.0022],
+                                             [0.0, 0.0, 0.0, 1.0]])
+        self.bool_video = False
+        self.initial_time = -10.0
 
 
     def loop(self):
@@ -112,7 +126,12 @@ class SaveImagesAndPosesReal():
                 frame_viz = cv2.resize(frame_viz, (int(frame.shape[1] * 4), int(frame.shape[0] * 4)))
                 cv2.imshow('image', frame_viz)
 
+
             with self.mutex:
+
+                if time.time() - self.initial_time < 4.0:
+                        cv2.imwrite(self.output_path_images + '/Image_' + str(self.counter) + '.png', frame)
+                        self.counter +=1
 
                 actual_state = self.state.get_state()
 
@@ -124,6 +143,7 @@ class SaveImagesAndPosesReal():
                     root_to_object_published = self.root_to_object_static
 
                 elif (self.pose_aruco is not None) and (self.pose_franka_ee is not None):
+
                     board_transform = pyq.Quaternion\
                                       (
                                           w = self.pose_aruco.orientation.w,
@@ -136,16 +156,12 @@ class SaveImagesAndPosesReal():
                     board_transform[2,3] = self.pose_aruco.position.z
 
                     # test
-                    object_transform = numpy.eye(4)
-                    object_transform[0,3] = 0.075
-                    object_transform[1,3] = 0.2
-                    object_transform[2,3] = 0.09237
 
-                    root_to_object = self.pose_franka_ee @ self.camera_transform @ board_transform @ object_transform
+                    root_to_object = self.pose_franka_ee @ self.camera_transform @ board_transform
                     root_to_object_published = root_to_object
 
                 if root_to_object_published is not None:
-                    self.pub_object_pose.publish(self.set_pose(root_to_object_published))
+                    self.pub_object_pose.publish(self.set_pose(root_to_object_published @ self.object_transform))
 
 
                 if self.pose_franka_ee is not None:
@@ -163,13 +179,42 @@ class SaveImagesAndPosesReal():
                     pass
 
                 elif actual_state == State.Save:
+                    print('saving..')
+                    f = open(self.output_path + 'file_poses_digit.txt', 'a')
+                    f.write(str(pose_digit.flatten()) + '\n')
+                    f.close()
 
-                    pass
+                    f = open(self.output_path + 'file_poses_obj.txt', 'a')
+                    f.write(str((root_to_object_published @ self.object_transform).flatten()) + '\n')
+                    f.close()
+
+                    cv2.imwrite(self.output_path_images + '/Image_' + str(self.counter) + '.png', frame)
+                    self.counter +=1
+                    self.state.set_state(State.Idle)
+
+                elif actual_state == State.SaveImage:
+                    print('saving image..')
+                    # f = open(self.output_path + 'file_poses_digit.txt', 'a')
+                    # f.write(str(pose_digit.flatten()) + '\n')
+                    # f.close()
+
+                    # f = open(self.output_path + 'file_poses_obj.txt', 'a')
+                    # f.write(str((root_to_object_published @ self.object_transform).flatten()) + '\n')
+                    # f.close()
+
+                    cv2.imwrite(self.output_path_images + '/Image_' + str(self.counter) + '.png', frame)
+                    self.counter +=1
+                    self.state.set_state(State.Idle)
 
                 elif actual_state == State.FreezeObjectPose:
                     rospy.loginfo('Freezing the object pose.')
 
                     self.root_to_object_static = root_to_object
+
+                    self.state.set_state(State.Idle)
+
+                elif actual_state == State.SaveVideo:
+                    self.initial_time = time.time()
 
                     self.state.set_state(State.Idle)
 
@@ -199,8 +244,28 @@ class SaveImagesAndPosesReal():
         with self.mutex:
             if command == 'freeze_object_pose':
                 self.state.set_state(State.FreezeObjectPose)
+
             elif command == 'save':
                 self.state.set_state(State.Save)
+            elif command == 'morex':
+                self.object_transform[0,3]+=0.001
+            elif command == 'morey':
+                self.object_transform[1,3]+=0.001
+            elif command == 'morez':
+                self.object_transform[2,3]+=0.001
+            elif command == 'lessx':
+                self.object_transform[0,3]-=0.001
+            elif command == 'lessy':
+                self.object_transform[1,3]-=0.001
+            elif command == 'lessz':
+                self.object_transform[2,3]-=0.001
+            # NO PAOLO
+            elif command == 'save_image':
+                self.state.set_state(State.SaveImage)
+            elif command == 'save_video':
+                 self.state.set_state(State.SaveVideo)
+                 self.bool_video = True
+
         #         # numpy.savetxt(self.output_path + '/poses.txt', numpy.array(self.poses))
         #         # numpy.savetxt(self.output_path + '/poses_aruco.txt', numpy.array(self.poses))
 
